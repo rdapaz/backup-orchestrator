@@ -39,10 +39,15 @@ class DashboardView(QWidget):
         layout.setSpacing(20)
 
         # -- Header
+        header_row = QHBoxLayout()
         header = QLabel("Dashboard")
         header.setFont(font_heading(20))
         header.setStyleSheet(f"color: {NAVY}; background: transparent; border: none;")
-        layout.addWidget(header)
+        header_row.addWidget(header)
+        from gui.widgets.help_window import make_help_button
+        header_row.addWidget(make_help_button("Dashboard", self))
+        header_row.addStretch()
+        layout.addLayout(header_row)
 
         # -- Stat cards row
         cards_row = QHBoxLayout()

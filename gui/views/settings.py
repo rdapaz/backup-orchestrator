@@ -40,10 +40,15 @@ class SettingsView(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(20)
 
+        header_row = QHBoxLayout()
         header = QLabel("Settings")
         header.setFont(font_heading(20))
         header.setStyleSheet(f"color: {NAVY}; background: transparent; border: none;")
-        layout.addWidget(header)
+        header_row.addWidget(header)
+        from gui.widgets.help_window import make_help_button
+        header_row.addWidget(make_help_button("Settings", self))
+        header_row.addStretch()
+        layout.addLayout(header_row)
 
         # -- Broker Configuration Card
         broker_card = QFrame()

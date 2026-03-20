@@ -38,6 +38,8 @@ class HistoryView(QWidget):
         header.setFont(font_heading(20))
         header.setStyleSheet(f"color: {NAVY}; background: transparent; border: none;")
         header_row.addWidget(header)
+        from gui.widgets.help_window import make_help_button
+        header_row.addWidget(make_help_button("History", self))
         header_row.addStretch()
 
         export_btn = QPushButton("Export CSV")
