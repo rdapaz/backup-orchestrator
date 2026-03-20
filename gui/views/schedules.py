@@ -1,0 +1,295 @@
+"""
+Schedules view -- manage backup schedules per client.
+"""
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea,
+    QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+    QDialog, QFormLayout, QLineEdit, QComboBox, QCheckBox, QMessageBox,
+)
+from gui.theme import (
+    NAVY, BG_MAIN, CARD_STYLE, TABLE_STYLE, BORDER,
+    BUTTON_STYLE, BUTTON_SECONDARY_STYLE, INPUT_STYLE, COMBO_STYLE,
+    TEXT_PRIMARY, TEXT_SECONDARY, POSITIVE,
+    font_heading, font_body,
+)
+
+PROFILES = ["all", "documents", "jetbrains", "databases", "photos"]
+
+CRON_PRESETS = {
+    "Daily at 2am":          "0 2 * * *",
+    "Every 12 hours":        "0 */12 * * *",
+    "Weekly (Sunday 3am)":   "0 3 * * 0",
+    "Every 2 weeks":         "0 2 1,15 * *",
+    "Monthly (1st at 2am)":  "0 2 1 * *",
+    "Custom":                "",
+}
+
+
+class AddScheduleDialog(QDialog):
+    """Dialog for adding a new backup schedule."""
+
+    def __init__(self, clients, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Schedule")
+        self.setMinimumWidth(500)
+
+        layout = QFormLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Client selector
+        self.client_combo = QComboBox()
+        self.client_combo.setStyleSheet(COMBO_STYLE)
+        for c in clients:
+            self.client_combo.addItem(c.name, c.uuid)
+        layout.addRow("Client:", self.client_combo)
+
+        # Profile
+        self.profile_combo = QComboBox()
+        self.profile_combo.setStyleSheet(COMBO_STYLE)
+        self.profile_combo.addItems(PROFILES)
+        layout.addRow("Profile:", self.profile_combo)
+
+        # Source directory
+        self.src_edit = QLineEdit()
+        self.src_edit.setStyleSheet(INPUT_STYLE)
+        self.src_edit.setPlaceholderText(r"e.g. C:\Users\user")
+        layout.addRow("Source Dir:", self.src_edit)
+
+        # Destination directory
+        self.dst_edit = QLineEdit()
+        self.dst_edit.setStyleSheet(INPUT_STYLE)
+        self.dst_edit.setPlaceholderText(r"e.g. D:\Backups")
+        layout.addRow("Dest Dir:", self.dst_edit)
+
+        # Cron expression
+        self.cron_preset = QComboBox()
+        self.cron_preset.setStyleSheet(COMBO_STYLE)
+        self.cron_preset.addItems(CRON_PRESETS.keys())
+        self.cron_preset.currentTextChanged.connect(self._on_preset_changed)
+        layout.addRow("Frequency:", self.cron_preset)
+
+        self.cron_edit = QLineEdit()
+        self.cron_edit.setStyleSheet(INPUT_STYLE)
+        self.cron_edit.setPlaceholderText("0 2 * * *")
+        self.cron_edit.setText("0 2 * * *")
+        layout.addRow("Cron Expr:", self.cron_edit)
+
+        # Password
+        self.password_edit = QLineEdit()
+        self.password_edit.setStyleSheet(INPUT_STYLE)
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.setPlaceholderText("Leave empty for auto-generated")
+        layout.addRow("Password:", self.password_edit)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_SECONDARY};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-size: 10pt;
+            }}
+            QPushButton:hover {{ background-color: #F3F4F6; }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        save_btn = QPushButton("Add Schedule")
+        save_btn.setStyleSheet(BUTTON_STYLE)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.clicked.connect(self._validate_and_accept)
+        btn_row.addWidget(save_btn)
+
+        layout.addRow(btn_row)
+
+    def _on_preset_changed(self, text: str):
+        cron = CRON_PRESETS.get(text, "")
+        if cron:
+            self.cron_edit.setText(cron)
+            self.cron_edit.setReadOnly(True)
+        else:
+            self.cron_edit.setReadOnly(False)
+            self.cron_edit.clear()
+            self.cron_edit.setFocus()
+
+    def _validate_and_accept(self):
+        if not self.src_edit.text().strip():
+            QMessageBox.warning(self, "Validation", "Source directory is required.")
+            return
+        if not self.dst_edit.text().strip():
+            QMessageBox.warning(self, "Validation", "Destination directory is required.")
+            return
+        if not self.cron_edit.text().strip():
+            QMessageBox.warning(self, "Validation", "Cron expression is required.")
+            return
+        self.accept()
+
+
+class SchedulesView(QWidget):
+    """Schedule management view."""
+
+    def __init__(self, db, credential_store=None, mqtt_worker=None, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.credential_store = credential_store
+        self.mqtt_worker = mqtt_worker
+        self.setStyleSheet(f"background: {BG_MAIN};")
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        # -- Header
+        header_row = QHBoxLayout()
+        header = QLabel("Schedules")
+        header.setFont(font_heading(20))
+        header.setStyleSheet(f"color: {NAVY}; background: transparent; border: none;")
+        header_row.addWidget(header)
+        header_row.addStretch()
+
+        self.add_btn = QPushButton("Add Schedule")
+        self.add_btn.setStyleSheet(BUTTON_STYLE)
+        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_btn.clicked.connect(self._on_add_schedule)
+        header_row.addWidget(self.add_btn)
+
+        layout.addLayout(header_row)
+
+        # -- Schedules table
+        table_card = QFrame()
+        table_card.setObjectName("card")
+        table_card.setStyleSheet(CARD_STYLE)
+        tc_layout = QVBoxLayout(table_card)
+        tc_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            ["Client", "Profile", "Source", "Destination", "Frequency", "Enabled", "Actions"]
+        )
+        self.table.setStyleSheet(TABLE_STYLE)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        h = self.table.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        h.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        h.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 140)
+        self.table.setColumnWidth(1, 100)
+        self.table.setColumnWidth(4, 160)
+        self.table.setColumnWidth(5, 70)
+        self.table.setColumnWidth(6, 180)
+
+        tc_layout.addWidget(self.table)
+        layout.addWidget(table_card, stretch=1)
+
+    def refresh(self):
+        """Reload schedules from database."""
+        schedules = self.db.get_schedules()
+        clients = {c.uuid: c.name for c in self.db.get_clients()}
+
+        self.table.setRowCount(len(schedules))
+        for row, sched in enumerate(schedules):
+            client_name = clients.get(sched.client_uuid, sched.client_uuid[:8])
+            items = [
+                client_name,
+                sched.profile,
+                sched.src_dir,
+                sched.dst_dir,
+                sched.cron_expr,
+                "Yes" if sched.enabled else "No",
+            ]
+            for col, text in enumerate(items):
+                item = QTableWidgetItem(text)
+                if col == 5:
+                    item.setForeground(QColor(POSITIVE if sched.enabled else TEXT_SECONDARY))
+                self.table.setItem(row, col, item)
+
+            # Actions cell with trigger button
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(4, 2, 4, 2)
+            actions_layout.setSpacing(4)
+
+            trigger_btn = QPushButton("Trigger")
+            trigger_btn.setStyleSheet(BUTTON_STYLE + "QPushButton { padding: 2px 8px; font-size: 9pt; }")
+            trigger_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            trigger_btn.setProperty("schedule_id", sched.id)
+            trigger_btn.clicked.connect(lambda checked, sid=sched.id: self._on_trigger(sid))
+            actions_layout.addWidget(trigger_btn)
+
+            sync_btn = QPushButton("Sync")
+            sync_btn.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 8px; font-size: 9pt; }")
+            sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            actions_layout.addWidget(sync_btn)
+
+            self.table.setCellWidget(row, 6, actions_widget)
+
+    def _on_add_schedule(self):
+        clients = self.db.get_clients()
+        if not clients:
+            QMessageBox.information(self, "No Clients", "Register at least one client before adding schedules.")
+            return
+
+        dialog = AddScheduleDialog(clients, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            client_uuid = dialog.client_combo.currentData()
+            password = dialog.password_edit.text().strip()
+
+            schedule_id = self.db.add_schedule(
+                client_uuid=client_uuid,
+                profile=dialog.profile_combo.currentText(),
+                src_dir=dialog.src_edit.text().strip(),
+                dst_dir=dialog.dst_edit.text().strip(),
+                cron_expr=dialog.cron_edit.text().strip(),
+            )
+
+            # Store password in credential store if provided
+            if password and self.credential_store and self.credential_store.is_unlocked():
+                self.credential_store.store(f"backup:{schedule_id}", password)
+
+            self.refresh()
+
+    def _on_trigger(self, schedule_id: int):
+        """Trigger an on-demand backup for this schedule."""
+        if not self.mqtt_worker:
+            QMessageBox.warning(self, "Not Connected", "MQTT is not connected.")
+            return
+
+        schedules = self.db.get_schedules()
+        sched = next((s for s in schedules if s.id == schedule_id), None)
+        if not sched:
+            return
+
+        # Retrieve password from credential store
+        password = ""
+        if self.credential_store and self.credential_store.is_unlocked():
+            password = self.credential_store.retrieve(f"backup:{schedule_id}") or ""
+
+        self.mqtt_worker.publish_command(sched.client_uuid, {
+            "action": "start_backup",
+            "config": {
+                "src_dir": sched.src_dir,
+                "dst_dir": sched.dst_dir,
+                "profile": sched.profile,
+                "password": password,
+            },
+        })
+        QMessageBox.information(self, "Triggered", f"Backup command sent to client.")
