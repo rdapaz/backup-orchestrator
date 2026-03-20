@@ -80,7 +80,7 @@ Schedules define what gets backed up, when, and where. Each schedule is tied to 
 
 ### Editing a Schedule
 
-Click the **Edit** button on any schedule row to modify its settings.
+Click the **Edit** button on any schedule row to modify its settings. Use the **Browse...** buttons to navigate to source and destination directories.
 
 ### Backup Profiles
 
@@ -159,6 +159,45 @@ The History view shows all backup results reported by clients, whether triggered
 ### Export
 
 Click **Export CSV** to save the filtered history to a CSV file.
+
+### Restore
+
+Successful backups show a **Restore** button in the Actions column.
+
+**How it works:**
+
+1. Click **Restore** on a backup entry
+2. The restore dialog opens with:
+   - **Archive path** (read-only) -- the backup file location
+   - **Password** -- automatically retrieved from the credential store if available
+   - **Restore To** -- the destination directory on the client machine
+3. Click **Restore** to send the command to the client agent via MQTT
+
+**Password storage:**
+
+- From v0.6.0 onwards, backup archive passwords are automatically sent back to the orchestrator and stored in the encrypted credential store
+- When you click Restore, the password is pre-filled -- no need to remember it
+- You can toggle password visibility with the **Show/Hide** button
+- For backups created before v0.6.0, passwords were only printed to the agent's terminal and are not recoverable through the orchestrator
+
+**Important notes:**
+
+- The client agent must be running to receive restore commands
+- The archive file must still exist at the original path on the client machine
+- Restoring does not overwrite existing files by default -- it extracts to the destination directory you specify
+- Restore results appear in the History view with profile "restore"
+
+---
+
+## Deleting Schedules
+
+Click the red **Delete** button on a schedule row to remove it.
+
+- A confirmation dialog is shown before deletion
+- The schedule is removed from the orchestrator database
+- A sync is automatically sent to the client, which removes the corresponding Windows Scheduled Task
+- The client agent must be running to receive the sync and delete the task
+- If the agent is offline, the task will be removed next time the agent connects and receives a sync
 
 ---
 
