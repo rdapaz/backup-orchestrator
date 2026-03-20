@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
     QDialog, QFormLayout, QLineEdit, QComboBox, QCheckBox, QMessageBox,
+    QFileDialog,
 )
 from gui.theme import (
     NAVY, BG_MAIN, CARD_STYLE, TABLE_STYLE, BORDER,
@@ -54,16 +55,30 @@ class AddScheduleDialog(QDialog):
         layout.addRow("Profile:", self.profile_combo)
 
         # Source directory
+        src_row = QHBoxLayout()
         self.src_edit = QLineEdit()
         self.src_edit.setStyleSheet(INPUT_STYLE)
         self.src_edit.setPlaceholderText(r"e.g. C:\Users\user")
-        layout.addRow("Source Dir:", self.src_edit)
+        src_row.addWidget(self.src_edit)
+        src_browse = QPushButton("Browse...")
+        src_browse.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 12px; font-size: 9pt; }")
+        src_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        src_browse.clicked.connect(lambda: self._browse_dir(self.src_edit))
+        src_row.addWidget(src_browse)
+        layout.addRow("Source Dir:", src_row)
 
         # Destination directory
+        dst_row = QHBoxLayout()
         self.dst_edit = QLineEdit()
         self.dst_edit.setStyleSheet(INPUT_STYLE)
         self.dst_edit.setPlaceholderText(r"e.g. D:\Backups")
-        layout.addRow("Dest Dir:", self.dst_edit)
+        dst_row.addWidget(self.dst_edit)
+        dst_browse = QPushButton("Browse...")
+        dst_browse.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 12px; font-size: 9pt; }")
+        dst_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        dst_browse.clicked.connect(lambda: self._browse_dir(self.dst_edit))
+        dst_row.addWidget(dst_browse)
+        layout.addRow("Dest Dir:", dst_row)
 
         # Cron expression
         self.cron_preset = QComboBox()
@@ -72,11 +87,15 @@ class AddScheduleDialog(QDialog):
         self.cron_preset.currentTextChanged.connect(self._on_preset_changed)
         layout.addRow("Frequency:", self.cron_preset)
 
+        cron_row = QHBoxLayout()
         self.cron_edit = QLineEdit()
         self.cron_edit.setStyleSheet(INPUT_STYLE)
         self.cron_edit.setPlaceholderText("0 2 * * *")
         self.cron_edit.setText("0 2 * * *")
-        layout.addRow("Cron Expr:", self.cron_edit)
+        cron_row.addWidget(self.cron_edit)
+        from gui.widgets.help_window import make_help_button
+        cron_row.addWidget(make_help_button("Cron Expression Format", self))
+        layout.addRow("Cron Expr:", cron_row)
 
         # Password
         self.password_edit = QLineEdit()
@@ -122,6 +141,11 @@ class AddScheduleDialog(QDialog):
             self.cron_edit.clear()
             self.cron_edit.setFocus()
 
+    def _browse_dir(self, line_edit: QLineEdit):
+        path = QFileDialog.getExistingDirectory(self, "Select Directory", line_edit.text())
+        if path:
+            line_edit.setText(path)
+
     def _validate_and_accept(self):
         if not self.src_edit.text().strip():
             QMessageBox.warning(self, "Validation", "Source directory is required.")
@@ -163,14 +187,28 @@ class EditScheduleDialog(QDialog):
         layout.addRow("Profile:", self.profile_combo)
 
         # Source directory
+        src_row = QHBoxLayout()
         self.src_edit = QLineEdit(schedule.src_dir)
         self.src_edit.setStyleSheet(INPUT_STYLE)
-        layout.addRow("Source Dir:", self.src_edit)
+        src_row.addWidget(self.src_edit)
+        src_browse = QPushButton("Browse...")
+        src_browse.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 12px; font-size: 9pt; }")
+        src_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        src_browse.clicked.connect(lambda: self._browse_dir(self.src_edit))
+        src_row.addWidget(src_browse)
+        layout.addRow("Source Dir:", src_row)
 
         # Destination directory
+        dst_row = QHBoxLayout()
         self.dst_edit = QLineEdit(schedule.dst_dir)
         self.dst_edit.setStyleSheet(INPUT_STYLE)
-        layout.addRow("Dest Dir:", self.dst_edit)
+        dst_row.addWidget(self.dst_edit)
+        dst_browse = QPushButton("Browse...")
+        dst_browse.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 12px; font-size: 9pt; }")
+        dst_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        dst_browse.clicked.connect(lambda: self._browse_dir(self.dst_edit))
+        dst_row.addWidget(dst_browse)
+        layout.addRow("Dest Dir:", dst_row)
 
         # Cron expression
         self.cron_preset = QComboBox()
@@ -185,11 +223,15 @@ class EditScheduleDialog(QDialog):
         self.cron_preset.currentTextChanged.connect(self._on_preset_changed)
         layout.addRow("Frequency:", self.cron_preset)
 
+        cron_row = QHBoxLayout()
         self.cron_edit = QLineEdit(schedule.cron_expr)
         self.cron_edit.setStyleSheet(INPUT_STYLE)
         if preset_match != "Custom":
             self.cron_edit.setReadOnly(True)
-        layout.addRow("Cron Expr:", self.cron_edit)
+        cron_row.addWidget(self.cron_edit)
+        from gui.widgets.help_window import make_help_button
+        cron_row.addWidget(make_help_button("Cron Expression Format", self))
+        layout.addRow("Cron Expr:", cron_row)
 
         # Enabled
         self.enabled_check = QCheckBox("Enabled")
@@ -229,6 +271,11 @@ class EditScheduleDialog(QDialog):
         btn_row.addWidget(save_btn)
 
         layout.addRow(btn_row)
+
+    def _browse_dir(self, line_edit: QLineEdit):
+        path = QFileDialog.getExistingDirectory(self, "Select Directory", line_edit.text())
+        if path:
+            line_edit.setText(path)
 
     def _on_preset_changed(self, text: str):
         cron = CRON_PRESETS.get(text, "")
@@ -315,7 +362,7 @@ class SchedulesView(QWidget):
         self.table.setColumnWidth(1, 100)
         self.table.setColumnWidth(4, 160)
         self.table.setColumnWidth(5, 70)
-        self.table.setColumnWidth(6, 240)
+        self.table.setColumnWidth(6, 310)
 
         tc_layout.addWidget(self.table)
         layout.addWidget(table_card, stretch=1)
@@ -366,6 +413,20 @@ class SchedulesView(QWidget):
             sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             sync_btn.clicked.connect(lambda checked, cid=sched.client_uuid: self._on_sync(cid))
             actions_layout.addWidget(sync_btn)
+
+            delete_btn = QPushButton("Delete")
+            delete_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {NEGATIVE}; color: white; border: none;
+                    border-radius: 4px; padding: 2px 8px; font-size: 9pt;
+                }}
+                QPushButton:hover {{ background-color: #DC2626; }}
+            """)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_btn.clicked.connect(
+                lambda checked, sid=sched.id, cid=sched.client_uuid: self._on_delete(sid, cid)
+            )
+            actions_layout.addWidget(delete_btn)
 
             self.table.setCellWidget(row, 6, actions_widget)
 
@@ -454,18 +515,15 @@ class SchedulesView(QWidget):
         })
         QMessageBox.information(self, "Triggered", f"Backup command sent to client.")
 
-    def _on_sync(self, client_uuid: str):
+    def _on_sync(self, client_uuid: str, silent: bool = False):
         """Sync all schedules for a client to the remote agent."""
         if not self.mqtt_worker:
-            QMessageBox.warning(self, "Not Connected", "MQTT is not connected.")
+            if not silent:
+                QMessageBox.warning(self, "Not Connected", "MQTT is not connected.")
             return
 
         schedules = self.db.get_schedules()
         client_schedules = [s for s in schedules if s.client_uuid == client_uuid and s.enabled]
-
-        if not client_schedules:
-            QMessageBox.information(self, "Nothing to Sync", "No enabled schedules for this client.")
-            return
 
         schedule_list = []
         for s in client_schedules:
@@ -483,7 +541,34 @@ class SchedulesView(QWidget):
             })
 
         self.mqtt_worker.publish_schedule_sync(client_uuid, schedule_list)
-        QMessageBox.information(
-            self, "Synced",
-            f"Pushed {len(schedule_list)} schedule(s) to client."
+        if not silent:
+            QMessageBox.information(
+                self, "Synced",
+                f"Pushed {len(schedule_list)} schedule(s) to client."
+            )
+
+    def _on_delete(self, schedule_id: int, client_uuid: str):
+        """Delete a schedule and sync the change to the client."""
+        reply = QMessageBox.question(
+            self,
+            "Delete Schedule",
+            "Are you sure you want to delete this schedule?\n\n"
+            "This will also remove the scheduled task on the client.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Remove from database
+        self.db.remove_schedule(schedule_id)
+
+        # Remove stored password
+        if self.credential_store and self.credential_store.is_unlocked():
+            self.credential_store.store(f"backup:{schedule_id}", "")
+
+        # Sync remaining schedules to the client (this removes the deleted task)
+        if self.mqtt_worker:
+            self._on_sync(client_uuid, silent=True)
+
+        self.refresh()
+        QMessageBox.information(self, "Deleted", "Schedule deleted and client synced.")
