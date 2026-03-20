@@ -138,7 +138,7 @@ class MainWindow(QMainWindow):
         self.dashboard_view = DashboardView(self.db, self.mqtt_worker)
         self.clients_view = ClientsView(self.db, self.mqtt_worker)
         self.schedules_view = SchedulesView(self.db, self.credential_store, self.mqtt_worker)
-        self.history_view = HistoryView(self.db)
+        self.history_view = HistoryView(self.db, self.credential_store, self.mqtt_worker)
         self.settings_view = SettingsView(self.db, self.credential_store)
         self.settings_view.connect_requested.connect(self._on_connect_requested)
 
@@ -191,6 +191,7 @@ class MainWindow(QMainWindow):
         self.dashboard_view.mqtt_worker = self.mqtt_worker
         self.clients_view.mqtt_worker = self.mqtt_worker
         self.schedules_view.mqtt_worker = self.mqtt_worker
+        self.history_view.mqtt_worker = self.mqtt_worker
 
     def _on_client_registered(self, payload: dict):
         """Handle a client registration request -- show approval dialog."""
@@ -265,7 +266,7 @@ class MainWindow(QMainWindow):
                               last_seen_at=datetime.now(timezone.utc).isoformat())
 
     def _on_backup_status(self, client_uuid: str, payload: dict):
-        self.db.add_backup_history(
+        history_id = self.db.add_backup_history(
             client_uuid=client_uuid,
             profile=payload.get("profile", "unknown"),
             started_at=payload.get("started_at", ""),
@@ -276,6 +277,12 @@ class MainWindow(QMainWindow):
             file_count=payload.get("file_count"),
             error_message=payload.get("error_message"),
         )
+
+        # Store archive password in credential store if provided
+        archive_password = payload.get("archive_password", "")
+        if archive_password and self.credential_store and self.credential_store.is_unlocked():
+            self.credential_store.store(f"archive:{history_id}", archive_password)
+            print(f"[MQTT] Stored archive password for history entry {history_id}")
 
     def set_connection_status(self, connected: bool):
         if connected:

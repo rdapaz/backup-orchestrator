@@ -103,9 +103,7 @@ def main():
         mqtt_worker.heartbeat_received.connect(
             lambda uuid, payload: _on_heartbeat(db, uuid, payload)
         )
-        mqtt_worker.backup_status_received.connect(
-            lambda uuid, payload: _on_backup_status(db, uuid, payload)
-        )
+        mqtt_worker.backup_status_received.connect(window._on_backup_status)
         mqtt_worker.start()  # Start after signals are connected
 
     window.show()

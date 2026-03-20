@@ -7,7 +7,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-    QComboBox, QDateEdit, QFileDialog, QMessageBox,
+    QComboBox, QDateEdit, QFileDialog, QMessageBox, QDialog,
+    QFormLayout, QLineEdit,
 )
 from PySide6.QtCore import QDate
 from gui.theme import (
@@ -21,9 +22,11 @@ from gui.theme import (
 class HistoryView(QWidget):
     """Backup history browser with filters and CSV export."""
 
-    def __init__(self, db, parent=None):
+    def __init__(self, db, credential_store=None, mqtt_worker=None, parent=None):
         super().__init__(parent)
         self.db = db
+        self.credential_store = credential_store
+        self.mqtt_worker = mqtt_worker
         self.setStyleSheet(f"background: {BG_MAIN};")
         self._build_ui()
 
@@ -89,9 +92,9 @@ class HistoryView(QWidget):
         tc_layout = QVBoxLayout(table_card)
         tc_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
-            ["Started", "Completed", "Client", "Profile", "Status", "Method", "Files", "Error"]
+            ["Started", "Completed", "Client", "Profile", "Status", "Method", "Files", "Error", "Actions"]
         )
         self.table.setStyleSheet(TABLE_STYLE)
         self.table.setAlternatingRowColors(True)
@@ -107,6 +110,7 @@ class HistoryView(QWidget):
         h.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         h.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         h.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(0, 140)
         self.table.setColumnWidth(1, 140)
         self.table.setColumnWidth(2, 120)
@@ -114,6 +118,7 @@ class HistoryView(QWidget):
         self.table.setColumnWidth(4, 80)
         self.table.setColumnWidth(5, 90)
         self.table.setColumnWidth(6, 60)
+        self.table.setColumnWidth(8, 80)
 
         tc_layout.addWidget(self.table)
         layout.addWidget(table_card, stretch=1)
@@ -170,6 +175,17 @@ class HistoryView(QWidget):
                     item.setForeground(QColor(STATUS_COLORS.get(entry.status, TEXT_SECONDARY)))
                 self.table.setItem(row, col, item)
 
+            # Restore button (only for successful backups with an archive path)
+            if entry.status == "success" and entry.archive_path:
+                restore_btn = QPushButton("Restore")
+                restore_btn.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 8px; font-size: 9pt; }")
+                restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                restore_btn.clicked.connect(
+                    lambda checked, hid=entry.id, path=entry.archive_path, cuuid=entry.client_uuid:
+                        self._on_restore(hid, path, cuuid)
+                )
+                self.table.setCellWidget(row, 8, restore_btn)
+
     def _on_export(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "backup_history.csv", "CSV Files (*.csv)")
         if not path:
@@ -195,3 +211,130 @@ class HistoryView(QWidget):
                 ])
 
         QMessageBox.information(self, "Exported", f"History exported to {path}")
+
+    def _on_restore(self, history_id: int, archive_path: str, client_uuid: str):
+        """Initiate a restore for a backup entry."""
+        # Try to retrieve the stored password
+        stored_password = ""
+        if self.credential_store and self.credential_store.is_unlocked():
+            stored_password = self.credential_store.retrieve(f"archive:{history_id}") or ""
+
+        # Show restore dialog
+        dialog = RestoreDialog(archive_path, stored_password, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        password = dialog.password_edit.text().strip()
+        dst_dir = dialog.dst_edit.text().strip()
+
+        if not password:
+            QMessageBox.warning(self, "Password Required", "Archive password is required for restore.")
+            return
+        if not dst_dir:
+            QMessageBox.warning(self, "Destination Required", "Restore destination directory is required.")
+            return
+
+        if not self.mqtt_worker:
+            QMessageBox.warning(self, "Not Connected", "MQTT is not connected.")
+            return
+
+        # Send restore command to the client
+        self.mqtt_worker.publish_command(client_uuid, {
+            "action": "start_restore",
+            "config": {
+                "archive_path": archive_path,
+                "dst_dir": dst_dir,
+                "password": password,
+            },
+        })
+        QMessageBox.information(self, "Restore Initiated",
+                                f"Restore command sent to client.\n\nArchive: {archive_path}\nDestination: {dst_dir}")
+
+
+class RestoreDialog(QDialog):
+    """Dialog for configuring a restore operation."""
+
+    def __init__(self, archive_path: str, password: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Restore Backup")
+        self.setMinimumWidth(550)
+
+        layout = QFormLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Archive path (read-only)
+        archive_edit = QLineEdit(archive_path)
+        archive_edit.setStyleSheet(INPUT_STYLE)
+        archive_edit.setReadOnly(True)
+        layout.addRow("Archive:", archive_edit)
+
+        # Password
+        self.password_edit = QLineEdit(password)
+        self.password_edit.setStyleSheet(INPUT_STYLE)
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        if password:
+            self.password_edit.setPlaceholderText("Password retrieved from credential store")
+        else:
+            self.password_edit.setPlaceholderText("Enter archive password")
+        layout.addRow("Password:", self.password_edit)
+
+        # Show password toggle
+        self.show_pass_btn = QPushButton("Show")
+        self.show_pass_btn.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 12px; font-size: 9pt; }")
+        self.show_pass_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.show_pass_btn.clicked.connect(self._toggle_password_visibility)
+        layout.addRow("", self.show_pass_btn)
+
+        # Destination directory
+        self.dst_edit = QLineEdit()
+        self.dst_edit.setStyleSheet(INPUT_STYLE)
+        self.dst_edit.setPlaceholderText(r"e.g. C:\Users\user\Restored")
+        layout.addRow("Restore To:", self.dst_edit)
+
+        # Browse button
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setStyleSheet(BUTTON_SECONDARY_STYLE + "QPushButton { padding: 2px 12px; font-size: 9pt; }")
+        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        browse_btn.clicked.connect(self._on_browse)
+        layout.addRow("", browse_btn)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_SECONDARY};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-size: 10pt;
+            }}
+            QPushButton:hover {{ background-color: #F3F4F6; }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        restore_btn = QPushButton("Restore")
+        restore_btn.setStyleSheet(BUTTON_STYLE)
+        restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        restore_btn.clicked.connect(self.accept)
+        btn_row.addWidget(restore_btn)
+
+        layout.addRow(btn_row)
+
+    def _toggle_password_visibility(self):
+        if self.password_edit.echoMode() == QLineEdit.EchoMode.Password:
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.show_pass_btn.setText("Hide")
+        else:
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self.show_pass_btn.setText("Show")
+
+    def _on_browse(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Restore Destination")
+        if path:
+            self.dst_edit.setText(path)
