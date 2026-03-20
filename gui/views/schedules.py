@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from gui.theme import (
     NAVY, BG_MAIN, CARD_STYLE, TABLE_STYLE, BORDER,
     BUTTON_STYLE, BUTTON_SECONDARY_STYLE, INPUT_STYLE, COMBO_STYLE,
-    TEXT_PRIMARY, TEXT_SECONDARY, POSITIVE,
+    TEXT_PRIMARY, TEXT_SECONDARY, POSITIVE, NEGATIVE,
     font_heading, font_body,
 )
 
@@ -389,8 +389,10 @@ class SchedulesView(QWidget):
                     item.setForeground(QColor(POSITIVE if sched.enabled else TEXT_SECONDARY))
                 self.table.setItem(row, col, item)
 
-            # Actions cell with trigger button
+            # Actions cell
+            self.table.setRowHeight(row, 36)
             actions_widget = QWidget()
+            actions_widget.setStyleSheet("background: transparent;")
             actions_layout = QHBoxLayout(actions_widget)
             actions_layout.setContentsMargins(4, 2, 4, 2)
             actions_layout.setSpacing(4)
