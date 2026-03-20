@@ -2,12 +2,14 @@
 Main application window with sidebar navigation.
 """
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, Signal
 from PySide6.QtGui import QFont, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QPushButton, QLabel, QFrame,
+    QPushButton, QLabel, QFrame, QMessageBox,
 )
+from gui.workers.mqtt_worker import MqttWorker
+from mqtt.payloads import RegistrationResponse
 
 from gui.theme import NAVY, BG_MAIN, font_heading, font_body
 from gui.views.dashboard import DashboardView
@@ -138,6 +140,7 @@ class MainWindow(QMainWindow):
         self.schedules_view = SchedulesView(self.db, self.credential_store, self.mqtt_worker)
         self.history_view = HistoryView(self.db)
         self.settings_view = SettingsView(self.db, self.credential_store)
+        self.settings_view.connect_requested.connect(self._on_connect_requested)
 
         self.stack.addWidget(self.dashboard_view)    # 0
         self.stack.addWidget(self.clients_view)      # 1
@@ -169,6 +172,110 @@ class MainWindow(QMainWindow):
         widget = self.stack.currentWidget()
         if hasattr(widget, "refresh"):
             widget.refresh()
+
+    def _on_connect_requested(self, host: str, port: int, username: str, password: str):
+        """Handle Save & Connect from Settings -- start or restart the MQTT worker."""
+        # Stop existing worker if running
+        if self.mqtt_worker and self.mqtt_worker.isRunning():
+            self.mqtt_worker.stop()
+            self.mqtt_worker.wait(3000)
+
+        self.mqtt_worker = MqttWorker(host, port, username, password)
+        self.mqtt_worker.connection_changed.connect(self.set_connection_status)
+        self.mqtt_worker.client_registered.connect(self._on_client_registered)
+        self.mqtt_worker.heartbeat_received.connect(self._on_heartbeat)
+        self.mqtt_worker.backup_status_received.connect(self._on_backup_status)
+        self.mqtt_worker.start()
+
+        # Update views with the new worker
+        self.dashboard_view.mqtt_worker = self.mqtt_worker
+        self.clients_view.mqtt_worker = self.mqtt_worker
+        self.schedules_view.mqtt_worker = self.mqtt_worker
+
+    def _on_client_registered(self, payload: dict):
+        """Handle a client registration request -- show approval dialog."""
+        client_uuid = payload.get("client_uuid", "unknown")
+        hostname = payload.get("hostname", "unknown")
+        ip_address = payload.get("ip_address", "unknown")
+        os_info = payload.get("os", "unknown")
+        version = payload.get("go_backup_version", "unknown")
+
+        print(f"[MQTT] Registration request from {hostname} ({client_uuid})")
+
+        reply = QMessageBox.question(
+            self,
+            "Client Registration",
+            f"A new client wants to register:\n\n"
+            f"  Hostname: {hostname}\n"
+            f"  UUID: {client_uuid}\n"
+            f"  IP: {ip_address}\n"
+            f"  OS: {os_info}\n"
+            f"  Version: {version}\n\n"
+            f"Approve this client?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Add or update client in database
+            existing = self.db.get_client(client_uuid)
+            if not existing:
+                self.db.add_client(
+                    uuid=client_uuid,
+                    name=hostname,
+                    hostname=hostname,
+                    ip_address=ip_address,
+                    os=os_info,
+                )
+            else:
+                self.db.update_client(
+                    client_uuid,
+                    hostname=hostname,
+                    ip_address=ip_address,
+                    os=os_info,
+                )
+
+            # Send approval response
+            resp = RegistrationResponse(
+                approved=True,
+                mqtt_username="",
+                mqtt_password="",
+                client_name=hostname,
+            )
+            if self.mqtt_worker:
+                self.mqtt_worker.publish_registration_response(client_uuid, resp)
+                print(f"[MQTT] Approved registration for {hostname}")
+
+            # Refresh views
+            if hasattr(self.clients_view, "refresh"):
+                self.clients_view.refresh()
+            if hasattr(self.dashboard_view, "refresh"):
+                self.dashboard_view.refresh()
+        else:
+            # Send denial
+            resp = RegistrationResponse(approved=False)
+            if self.mqtt_worker:
+                self.mqtt_worker.publish_registration_response(client_uuid, resp)
+                print(f"[MQTT] Denied registration for {hostname}")
+
+    def _on_heartbeat(self, client_uuid: str, payload: dict):
+        from datetime import datetime, timezone
+        status = payload.get("status", "idle")
+        db_status = "online" if status == "idle" else status
+        self.db.update_client(client_uuid, status=db_status,
+                              last_seen_at=datetime.now(timezone.utc).isoformat())
+
+    def _on_backup_status(self, client_uuid: str, payload: dict):
+        self.db.add_backup_history(
+            client_uuid=client_uuid,
+            profile=payload.get("profile", "unknown"),
+            started_at=payload.get("started_at", ""),
+            completed_at=payload.get("completed_at"),
+            status=payload.get("status", "unknown"),
+            method=payload.get("method", "unknown"),
+            archive_path=payload.get("archive_path"),
+            file_count=payload.get("file_count"),
+            error_message=payload.get("error_message"),
+        )
 
     def set_connection_status(self, connected: bool):
         if connected:

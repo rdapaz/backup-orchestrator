@@ -2,7 +2,7 @@
 Settings view -- broker config, master password, defaults.
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea,
     QLineEdit, QSpinBox, QPushButton, QTextEdit, QMessageBox, QFormLayout,
@@ -17,6 +17,9 @@ from gui.theme import (
 
 class SettingsView(QWidget):
     """Application settings view."""
+
+    # Emitted when the user clicks Connect — MainWindow handles the actual connection
+    connect_requested = Signal(str, int, str, str)  # host, port, username, password
 
     def __init__(self, db, credential_store=None, parent=None):
         super().__init__(parent)
@@ -94,6 +97,23 @@ class SettingsView(QWidget):
         save_broker_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_broker_btn.clicked.connect(self._on_save_broker)
         broker_btn_row.addWidget(save_broker_btn)
+
+        connect_btn = QPushButton("Save && Connect")
+        connect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {POSITIVE};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-size: 10pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: #16A34A; }}
+        """)
+        connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        connect_btn.clicked.connect(self._on_save_and_connect)
+        broker_btn_row.addWidget(connect_btn)
 
         bl.addLayout(broker_btn_row)
         layout.addWidget(broker_card)
@@ -237,11 +257,22 @@ class SettingsView(QWidget):
             QMessageBox.warning(self, "Connection Failed", f"Could not connect to broker:\n{e}")
 
     def _on_save_broker(self):
+        self._save_broker_settings()
+        QMessageBox.information(self, "Saved", "Broker settings saved.")
+
+    def _on_save_and_connect(self):
+        self._save_broker_settings()
+        host = self.broker_host.text().strip() or "localhost"
+        port = self.broker_port.value()
+        username = self.broker_user.text().strip()
+        password = self.broker_pass.text().strip()
+        self.connect_requested.emit(host, port, username, password)
+
+    def _save_broker_settings(self):
         self.db.set_setting("broker_host", self.broker_host.text().strip() or "localhost")
         self.db.set_setting("broker_port", str(self.broker_port.value()))
         self.db.set_setting("broker_username", self.broker_user.text().strip())
         self.db.set_setting("broker_password", self.broker_pass.text().strip())
-        QMessageBox.information(self, "Saved", "Broker settings saved.")
 
     def _on_save_defaults(self):
         self.db.set_setting("default_workers", str(self.default_workers.value()))

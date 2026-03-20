@@ -57,10 +57,11 @@ class MqttWorker(QThread):
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
 
+        print(f"[MQTT] Connecting to {self._broker_host}:{self._broker_port}...")
         try:
             self._client.connect(self._broker_host, self._broker_port, keepalive=30)
         except Exception as e:
-            log.error("MQTT connect failed: %s", e)
+            print(f"[MQTT] Connect failed: {e}")
             self.connection_changed.emit(False)
             return
 
@@ -84,36 +85,39 @@ class MqttWorker(QThread):
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
-            log.info("Connected to MQTT broker")
+            print("[MQTT] Connected to broker")
             self.connection_changed.emit(True)
 
             # Subscribe to orchestrator topics
-            client.subscribe(topics.REGISTRATION_REQUEST, qos=1)
-            client.subscribe(topics.HEARTBEAT_WILDCARD, qos=0)
-            client.subscribe(topics.STATUS_WILDCARD, qos=1)
+            r1 = client.subscribe(topics.REGISTRATION_REQUEST, qos=1)
+            r2 = client.subscribe(topics.HEARTBEAT_WILDCARD, qos=0)
+            r3 = client.subscribe(topics.STATUS_WILDCARD, qos=1)
+            print(f"[MQTT] Subscribed: registration={r1}, heartbeat={r2}, status={r3}")
         else:
-            log.error("MQTT connect failed: reason_code=%s", reason_code)
+            print(f"[MQTT] Connect failed: reason_code={reason_code}")
             self.connection_changed.emit(False)
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
-        log.info("Disconnected from MQTT broker (reason=%s)", reason_code)
+        print(f"[MQTT] Disconnected (reason={reason_code})")
         self.connection_changed.emit(False)
 
     def _on_message(self, client, userdata, msg: mqtt.MQTTMessage):
+        print(f"[MQTT] Message on {msg.topic}: {msg.payload[:200]}")
         try:
             envelope = unwrap(msg.payload)
         except Exception as e:
-            log.warning("Failed to parse MQTT message on %s: %s", msg.topic, e)
+            print(f"[MQTT] Failed to parse message on {msg.topic}: {e}")
             return
 
         if envelope.version > SCHEMA_VERSION:
-            log.warning("Ignoring message with version %d (we support %d)",
-                       envelope.version, SCHEMA_VERSION)
+            print(f"[MQTT] Ignoring message with version {envelope.version} (we support {SCHEMA_VERSION})")
             return
 
         msg_type = envelope.type
+        print(f"[MQTT] Message type: {msg_type}")
 
         if msg_type == "register_request":
+            print(f"[MQTT] Registration request received: {envelope.payload}")
             self.client_registered.emit(envelope.payload)
 
         elif msg_type == "heartbeat":
