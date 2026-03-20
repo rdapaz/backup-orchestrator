@@ -1,3 +1,3 @@
 [submodule "go_backup"]
 	path = go_backup
-	url = D:/Work/Projects/go_backup
+	url = https://github.com/rdapaz/go_backup.git
