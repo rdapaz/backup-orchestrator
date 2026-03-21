@@ -17,7 +17,7 @@ from gui.theme import (
     font_heading, font_body,
 )
 
-PROFILES = ["all", "documents", "jetbrains", "databases", "photos"]
+PROFILES = ["all", "documents", "jetbrains", "databases", "photos", "ebooks"]
 
 CRON_PRESETS = {
     "Daily at 2am":          "0 2 * * *",
