@@ -154,7 +154,7 @@ class MqttWorker(QThread):
 
         sync = ScheduleSync(schedules=schedule_list)
         topic = topics.schedules(client_uuid)
-        self._client.publish(topic, sync.to_mqtt(), qos=1, retain=True)
+        self._client.publish(topic, sync.to_mqtt(), qos=1, retain=False)
 
     def publish_registration_response(
         self, client_uuid: str, response: RegistrationResponse
